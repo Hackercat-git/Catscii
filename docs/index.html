@@ -48,7 +48,7 @@
     font-size: 6px; line-height: 6px; white-space: pre; color: #e6edf3;
   }
   .placeholder { color: var(--dim); font-size: 13px; font-family: 'Segoe UI', Arial, sans-serif; }
-  .actions { display: flex; gap: 10px; margin-top: 12px; }
+  .actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
   .note {
     margin-top: 18px; font-size: 12px; color: var(--dim); line-height: 1.5;
     border-left: 2px solid var(--border); padding-left: 12px;
@@ -72,6 +72,7 @@
         <option value="blocks">Blocks</option>
         <option value="paws">Paws</option>
         <option value="binary">Binary</option>
+        <option value="shade">Shade</option>
       </select>
     </div>
     <div class="field">
@@ -80,7 +81,15 @@
     </div>
     <div class="field checkbox-field">
       <input type="checkbox" id="color">
-      <label for="color">Use original colors</label>
+      <label for="color">Color</label>
+    </div>
+    <div class="field checkbox-field">
+      <input type="checkbox" id="invert">
+      <label for="invert">Invert</label>
+    </div>
+    <div class="field checkbox-field">
+      <input type="checkbox" id="grayscale">
+      <label for="grayscale">Grayscale</label>
     </div>
     <button id="convertBtn" disabled>Convert</button>
   </div>
@@ -102,19 +111,22 @@
 const STYLES = {
   standard: "@%#*+=-:. ",
   blocks: "█▓▒░ ",
-  paws: "🐾*·.· ",
+  paws: "WM@#&8*o+=-:,. ",
   binary: "10 ",
+  shade: "■▪▫◾◽□  ",
 };
 const ASPECT_CORRECTION = 0.55;
 
-const fileInput = document.getElementById("file");
-const styleSelect = document.getElementById("style");
-const widthInput = document.getElementById("width");
-const colorCheckbox = document.getElementById("color");
-const convertBtn = document.getElementById("convertBtn");
-const output = document.getElementById("output");
-const downloadTxtBtn = document.getElementById("downloadTxt");
-const downloadHtmlBtn = document.getElementById("downloadHtml");
+const fileInput    = document.getElementById("file");
+const styleSelect  = document.getElementById("style");
+const widthInput   = document.getElementById("width");
+const colorCb      = document.getElementById("color");
+const invertCb     = document.getElementById("invert");
+const grayscaleCb  = document.getElementById("grayscale");
+const convertBtn   = document.getElementById("convertBtn");
+const output       = document.getElementById("output");
+const dlTxtBtn     = document.getElementById("downloadTxt");
+const dlHtmlBtn    = document.getElementById("downloadHtml");
 
 let currentImage = null;
 let lastPlainText = "";
@@ -135,16 +147,24 @@ function pixelToChar(brightness, ramp) {
 
 function convert() {
   if (!currentImage) return;
-  const ramp = STYLES[styleSelect.value];
-  const width = Math.max(10, Math.min(300, parseInt(widthInput.value, 10) || 100));
-  const useColor = colorCheckbox.checked;
+  let ramp = STYLES[styleSelect.value] || STYLES.standard;
+  const width    = Math.max(10, Math.min(300, parseInt(widthInput.value, 10) || 100));
+  const useColor = colorCb.checked;
+  const invert   = invertCb.checked;
+  const toGray   = grayscaleCb.checked;
 
-  const ratio = currentImage.height / currentImage.width;
+  if (invert) ramp = ramp.split("").reverse().join("");
+
+  const ratio  = currentImage.height / currentImage.width;
   const height = Math.max(1, Math.round(width * ratio * ASPECT_CORRECTION));
 
   const canvas = document.createElement("canvas");
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext("2d");
+
+  if (toGray) {
+    ctx.filter = "grayscale(1)";
+  }
   ctx.drawImage(currentImage, 0, 0, width, height);
   const data = ctx.getImageData(0, 0, width, height).data;
 
@@ -157,7 +177,7 @@ function convert() {
       const brightness = 0.2126*r + 0.7152*g + 0.0722*b;
       const ch = pixelToChar(brightness, ramp);
       plain += ch;
-      if (useColor) {
+      if (useColor && !toGray) {
         const safeCh = ch.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
         htmlSpans += `<span style="color:rgb(${r},${g},${b})">${safeCh}</span>`;
       } else {
@@ -171,25 +191,27 @@ function convert() {
   lastPlainText = plain;
   lastHtmlSpans = htmlSpans;
   output.innerHTML = htmlSpans;
-  downloadTxtBtn.disabled = false;
-  downloadHtmlBtn.disabled = false;
+  dlTxtBtn.disabled = false;
+  dlHtmlBtn.disabled = false;
 }
 
 function download(filename, content, mime) {
   const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
 convertBtn.addEventListener("click", convert);
-downloadTxtBtn.addEventListener("click", () => download("catscii-output.txt", lastPlainText, "text/plain"));
-downloadHtmlBtn.addEventListener("click", () => {
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Catscii output</title>` +
+dlTxtBtn.addEventListener("click", () => download("catscii-output.txt", lastPlainText, "text/plain"));
+dlHtmlBtn.addEventListener("click", () => {
+  const html =
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Catscii output</title>` +
     `<style>body{background:#0d1117;margin:0;padding:16px;}pre{font-family:'Consolas','Courier New',monospace;` +
-    `font-size:6px;line-height:6px;color:#e6edf3;white-space:pre;}</style></head><body><pre>${lastHtmlSpans}</pre></body></html>`;
+    `font-size:6px;line-height:6px;color:#e6edf3;white-space:pre;}</style></head>` +
+    `<body><pre>${lastHtmlSpans}</pre></body></html>`;
   download("catscii-output.html", html, "text/html");
 });
 </script>

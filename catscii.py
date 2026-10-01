@@ -36,11 +36,17 @@ def load_image(path):
         raise CatsciiError(f"Could not open image: {exc}") from exc
 
 
-def resize_image(image, width):
+RESAMPLE_FILTERS = {
+    "smooth": Image.Resampling.LANCZOS,
+    "pixel": Image.Resampling.NEAREST,
+}
+
+def resize_image(image, width, height=None, resample=Image.Resampling.LANCZOS):
     original_w, original_h = image.size
-    ratio = original_h / original_w
-    height = max(1, round(width * ratio * ASPECT_CORRECTION))
-    return image.resize((width, height), Image.Resampling.LANCZOS)
+    if height is None:
+        ratio = original_h / original_w
+        height = max(1, round(width * ratio * ASPECT_CORRECTION))
+    return image.resize((width, height), resample)
 
 
 def pixel_to_char(brightness, ramp):
@@ -82,13 +88,17 @@ def _render_ascii_numpy(gray, image, ramp, use_color, width, height):
 
     if use_color:
         rgb_arr = np.array(image.convert("RGB"), dtype=np.uint8)
-        lines = []
-        for y in range(height):
-            row = []
-            for x in range(width):
-                r, g, b = int(rgb_arr[y, x, 0]), int(rgb_arr[y, x, 1]), int(rgb_arr[y, x, 2])
-                row.append(f"{ansi_color(r, g, b)}{chars[y, x]}{ANSI_RESET}")
-            lines.append("".join(row))
+        # Build every ANSI prefix vectorised: "\x1b[38;2;R;G;Bm"
+        r_s = np.char.mod("%d", rgb_arr[:, :, 0])
+        g_s = np.char.mod("%d", rgb_arr[:, :, 1])
+        b_s = np.char.mod("%d", rgb_arr[:, :, 2])
+        prefixes = np.char.add(
+            np.char.add(np.char.add(np.char.add("\x1b[38;2;", r_s), ";"),
+                        np.char.add(g_s, ";")),
+            np.char.add(b_s, "m")
+        )
+        pixels = np.char.add(np.char.add(prefixes, chars.astype(str)), ANSI_RESET)
+        lines = ["".join(row) for row in pixels.tolist()]
     else:
         lines = ["".join(row) for row in chars.tolist()]
     return "\n".join(lines)
@@ -167,6 +177,16 @@ def main(argv=None):
         help="Output width in characters (default: 100)",
     )
     parser.add_argument(
+        "--height", type=int, default=None,
+        help="Output height in lines (default: auto from aspect ratio)",
+    )
+    parser.add_argument(
+        "--resize",
+        choices=["smooth", "pixel"],
+        default="smooth",
+        help="Resampling filter: smooth (LANCZOS, default) or pixel (NEAREST, for pixel art)",
+    )
+    parser.add_argument(
         "--style",
         choices=sorted(STYLES),
         default=DEFAULT_STYLE,
@@ -200,7 +220,7 @@ def main(argv=None):
         image = load_image(args.image)
     except CatsciiError as exc:
         sys.exit(str(exc))
-    resized = resize_image(image, args.width)
+    resized = resize_image(image, args.width, height=args.height, resample=RESAMPLE_FILTERS[args.resize])
     art = render_ascii(resized, args.style, args.color, invert=args.invert, grayscale=args.grayscale)
 
     if args.output:
