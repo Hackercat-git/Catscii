@@ -9,6 +9,12 @@ import sys
 
 from PIL import Image
 
+try:
+    import numpy as _np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+
 from banner import print_banner
 from styles import DEFAULT_STYLE, STYLES, get_ramp
 
@@ -17,13 +23,17 @@ from styles import DEFAULT_STYLE, STYLES, get_ramp
 ASPECT_CORRECTION = 0.55
 
 
+class CatsciiError(Exception):
+    """Raised for user-facing errors so callers can handle them cleanly."""
+
+
 def load_image(path):
     if not os.path.isfile(path):
-        sys.exit(f"File not found: {path}")
+        raise CatsciiError(f"File not found: {path}")
     try:
         return Image.open(path)
     except Exception as exc:
-        sys.exit(f"Could not open image: {exc}")
+        raise CatsciiError(f"Could not open image: {exc}") from exc
 
 
 def resize_image(image, width):
@@ -46,16 +56,46 @@ def ansi_color(r, g, b):
 ANSI_RESET = "\x1b[0m"
 
 
-def render_ascii(image, style, use_color, invert=False):
+def render_ascii(image, style, use_color, invert=False, grayscale=False):
     ramp = get_ramp(style)
     if invert:
         ramp = ramp[::-1]
 
-    grayscale = image.convert("L")
+    if grayscale:
+        image = image.convert("L").convert("RGB")
+    gray = image.convert("L")
     width, height = image.size
 
     # Bulk pixel access is ~10x faster than calling getpixel() per pixel
-    gray_pixels = list(grayscale.get_flattened_data())
+    if _HAS_NUMPY:
+        return _render_ascii_numpy(gray, image, ramp, use_color, width, height)
+    return _render_ascii_pure(gray, image, ramp, use_color, width, height)
+
+
+def _render_ascii_numpy(gray, image, ramp, use_color, width, height):
+    import numpy as np
+    ramp_arr = list(ramp)
+    n = len(ramp_arr)
+    gray_arr = np.array(gray, dtype=np.uint8)
+    indices = np.minimum(n - 1, (gray_arr.astype(np.uint16) * n // 256)).astype(np.uint8)
+    chars = np.array(ramp_arr, dtype=object)[indices]  # shape: (height, width)
+
+    if use_color:
+        rgb_arr = np.array(image.convert("RGB"), dtype=np.uint8)
+        lines = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                r, g, b = int(rgb_arr[y, x, 0]), int(rgb_arr[y, x, 1]), int(rgb_arr[y, x, 2])
+                row.append(f"{ansi_color(r, g, b)}{chars[y, x]}{ANSI_RESET}")
+            lines.append("".join(row))
+    else:
+        lines = ["".join(row) for row in chars.tolist()]
+    return "\n".join(lines)
+
+
+def _render_ascii_pure(gray, image, ramp, use_color, width, height):
+    gray_pixels = list(gray.get_flattened_data())
 
     if use_color:
         rgb_pixels = list(image.convert("RGB").get_flattened_data())
@@ -142,6 +182,11 @@ def main(argv=None):
         action="store_true",
         help="Invert brightness mapping (useful for light backgrounds)",
     )
+    parser.add_argument(
+        "--grayscale",
+        action="store_true",
+        help="Convert image to grayscale before rendering",
+    )
     parser.add_argument("--banner", action="store_true", help="Show the Catscii banner and exit")
     args = parser.parse_args(argv)
 
@@ -151,9 +196,12 @@ def main(argv=None):
             parser.print_help()
         return
 
-    image = load_image(args.image)
+    try:
+        image = load_image(args.image)
+    except CatsciiError as exc:
+        sys.exit(str(exc))
     resized = resize_image(image, args.width)
-    art = render_ascii(resized, args.style, args.color, invert=args.invert)
+    art = render_ascii(resized, args.style, args.color, invert=args.invert, grayscale=args.grayscale)
 
     if args.output:
         ext = os.path.splitext(args.output)[1].lower()

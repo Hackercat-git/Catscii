@@ -8,7 +8,7 @@ STYLES = {
     # Unicode block shades: crisp, high-contrast result.
     "blocks": "█▓▒░ ",
     # Playful cat-themed ramp: paws and whisker-like characters.
-    "paws": "🐾*·.· ",
+    "paws": "WM@#&8*o+=-:,. ",  # cat-themed ramp, terminal-safe (no emoji)
     # Binary / "matrix" look.
     "binary": "10 ",
     # Smooth shade ramp using box-drawing and shade characters.
