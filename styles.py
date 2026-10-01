@@ -1,5 +1,4 @@
 """Character ramps used to map pixel brightness to characters.
-
 Each ramp goes from darkest (index 0) to lightest (last index).
 """
 
@@ -12,6 +11,8 @@ STYLES = {
     "paws": "🐾*·.· ",
     # Binary / "matrix" look.
     "binary": "10 ",
+    # Smooth shade ramp using box-drawing and shade characters.
+    "shade": "■▪▫◾◽□  ",
 }
 
 DEFAULT_STYLE = "standard"
