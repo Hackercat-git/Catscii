@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Catscii — ASCII art generator</title>
+<style>
+  :root {
+    --bg: #0b0b0f; --panel: #14131c; --border: #2a2838;
+    --text: #e8e6f0; --dim: #9a95ad; --accent: #c084fc;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: inherit; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', Arial, sans-serif; padding: 24px 16px 48px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--dim); margin: 0 0 22px; font-size: 14px; }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 20px;
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  label { font-size: 12px; color: var(--dim); }
+  select, input[type=number], input[type=file] {
+    padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: #0d0c14; color: var(--text); font-size: 13px;
+  }
+  input[type=checkbox] { width: 16px; height: 16px; }
+  .checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+  button {
+    background: var(--accent); color: #1a0f2e; border: none; border-radius: 8px;
+    padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .output-box {
+    background: #000; border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; overflow-x: auto; min-height: 120px;
+  }
+  pre {
+    margin: 0; font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 6px; line-height: 6px; white-space: pre; color: #e6edf3;
+  }
+  .placeholder { color: var(--dim); font-size: 13px; font-family: 'Segoe UI', Arial, sans-serif; }
+  .actions { display: flex; gap: 10px; margin-top: 12px; }
+  .note {
+    margin-top: 18px; font-size: 12px; color: var(--dim); line-height: 1.5;
+    border-left: 2px solid var(--border); padding-left: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🐾 Catscii — ASCII art generator</h1>
+  <p class="sub">Upload an image and convert it to ASCII art right in your browser. Nothing is uploaded anywhere — the conversion happens entirely on your device.</p>
+
+  <div class="controls">
+    <div class="field">
+      <label for="file">Image</label>
+      <input type="file" id="file" accept="image/*">
+    </div>
+    <div class="field">
+      <label for="style">Style</label>
+      <select id="style">
+        <option value="standard">Standard</option>
+        <option value="blocks">Blocks</option>
+        <option value="paws">Paws</option>
+        <option value="binary">Binary</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="width">Width (characters)</label>
+      <input type="number" id="width" value="100" min="20" max="300" step="10">
+    </div>
+    <div class="field checkbox-field">
+      <input type="checkbox" id="color">
+      <label for="color">Use original colors</label>
+    </div>
+    <button id="convertBtn" disabled>Convert</button>
+  </div>
+
+  <div class="output-box"><pre id="output"><span class="placeholder">Your ASCII art will appear here.</span></pre></div>
+
+  <div class="actions">
+    <button id="downloadTxt" disabled>Download .txt</button>
+    <button id="downloadHtml" disabled>Download .html</button>
+  </div>
+
+  <div class="note">
+    This demo mirrors the <code>catscii.py</code> command-line tool. Want to run it locally on your own images with more control?
+    See the <a href="https://github.com/Hackercat-git/Catscii" style="color: var(--accent);">README</a> for installation steps.
+  </div>
+</div>
+
+<script>
+const STYLES = {
+  standard: "@%#*+=-:. ",
+  blocks: "█▓▒░ ",
+  paws: "🐾*·.· ",
+  binary: "10 ",
+};
+const ASPECT_CORRECTION = 0.55;
+
+const fileInput = document.getElementById("file");
+const styleSelect = document.getElementById("style");
+const widthInput = document.getElementById("width");
+const colorCheckbox = document.getElementById("color");
+const convertBtn = document.getElementById("convertBtn");
+const output = document.getElementById("output");
+const downloadTxtBtn = document.getElementById("downloadTxt");
+const downloadHtmlBtn = document.getElementById("downloadHtml");
+
+let currentImage = null;
+let lastPlainText = "";
+let lastHtmlSpans = "";
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0];
+  if (!file) { convertBtn.disabled = true; return; }
+  const img = new Image();
+  img.onload = () => { currentImage = img; convertBtn.disabled = false; };
+  img.src = URL.createObjectURL(file);
+});
+
+function pixelToChar(brightness, ramp) {
+  const index = Math.min(ramp.length - 1, Math.floor(brightness / 256 * ramp.length));
+  return ramp[index];
+}
+
+function convert() {
+  if (!currentImage) return;
+  const ramp = STYLES[styleSelect.value];
+  const width = Math.max(10, Math.min(300, parseInt(widthInput.value, 10) || 100));
+  const useColor = colorCheckbox.checked;
+
+  const ratio = currentImage.height / currentImage.width;
+  const height = Math.max(1, Math.round(width * ratio * ASPECT_CORRECTION));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(currentImage, 0, 0, width, height);
+  const data = ctx.getImageData(0, 0, width, height).data;
+
+  let plain = "";
+  let htmlSpans = "";
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i], g = data[i+1], b = data[i+2];
+      const brightness = 0.2126*r + 0.7152*g + 0.0722*b;
+      const ch = pixelToChar(brightness, ramp);
+      plain += ch;
+      if (useColor) {
+        const safeCh = ch.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        htmlSpans += `<span style="color:rgb(${r},${g},${b})">${safeCh}</span>`;
+      } else {
+        htmlSpans += ch.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      }
+    }
+    plain += "\n";
+    htmlSpans += "\n";
+  }
+
+  lastPlainText = plain;
+  lastHtmlSpans = htmlSpans;
+  output.innerHTML = htmlSpans;
+  downloadTxtBtn.disabled = false;
+  downloadHtmlBtn.disabled = false;
+}
+
+function download(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+convertBtn.addEventListener("click", convert);
+downloadTxtBtn.addEventListener("click", () => download("catscii-output.txt", lastPlainText, "text/plain"));
+downloadHtmlBtn.addEventListener("click", () => {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Catscii output</title>` +
+    `<style>body{background:#0d1117;margin:0;padding:16px;}pre{font-family:'Consolas','Courier New',monospace;` +
+    `font-size:6px;line-height:6px;color:#e6edf3;white-space:pre;}</style></head><body><pre>${lastHtmlSpans}</pre></body></html>`;
+  download("catscii-output.html", html, "text/html");
+});
+</script>
+</body>
+</html>
